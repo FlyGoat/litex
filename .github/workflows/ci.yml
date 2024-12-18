@@ -23,7 +23,7 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
-          python-version: "3.9"
+          python-version: "3.12"
           cache: "pip"
           cache-dependency-path: "setup.py"
 
@@ -72,5 +72,4 @@ jobs:
 
       # Test
       - name: Run Tests
-        run: |
-          python3 setup.py test
+        run: python3 -m unittest discover

@@ -6,16 +6,23 @@
 
 import unittest
 import pexpect
-import sys
 import os
+import sys
+import tempfile
 
-class TestCPU(unittest.TestCase):
-    def boot_test(self, cpu_type, jobs, cpu_variant="standard"):
-        cmd = f'litex_sim --cpu-type={cpu_type} --cpu-variant={cpu_variant} --opt-level=O0 --jobs {jobs}'
-        litex_prompt = [b'\033\[[0-9;]+mlitex\033\[[0-9;]+m>']
+class TestIntegration(unittest.TestCase):
+    def boot_test(self, cpu_type="vexriscv", jobs=4, cpu_variant="standard", args=""):
+        cmd = f'litex_sim --cpu-type={cpu_type} --cpu-variant={cpu_variant} {args} --opt-level=O0 --jobs {jobs}'
+        litex_prompt = [r'\033\[[0-9;]+mlitex\033\[[0-9;]+m>']
         is_success = True
-        with open("/tmp/test_boot_log", "wb") as result_file:
-            p = pexpect.spawn(cmd, timeout=None, logfile=result_file)
+
+        print(f'Running {cmd}')
+
+        with tempfile.TemporaryFile(mode='w', prefix="litex_test") as log_file:
+            log_file.writelines(f"Command: {cmd}")
+            log_file.flush()
+
+            p = pexpect.spawn(cmd, timeout=None, encoding='utf-8', logfile=log_file)
             try:
                 match_id = p.expect(litex_prompt, timeout=1200)
             except pexpect.EOF:
@@ -25,13 +32,13 @@ class TestCPU(unittest.TestCase):
                 print('\n*** Timeout ')
                 is_success = False
 
-        if not is_success:
-            print(f'*** {cpu_type} Boot Failure')
-            with open("/tmp/test_boot_log", "r") as result_file:
-                print(result_file.read())
-        else:
-            p.terminate(force=True)
-            print(f'*** {cpu_type} Boot Success')
+            if not is_success:
+                print(f'*** ({self.id()}) Boot Failure: {cmd}')
+                log_file.seek(0)
+                print(log_file.read())
+            else:
+                p.terminate(force=True)
+                print(f'*** ({self.id()}) Boot Success: {cmd}')
 
         return is_success
 
@@ -70,3 +77,56 @@ class TestCPU(unittest.TestCase):
         for cpu in tested_cpus:
              with self.subTest(target=cpu):
                 self.assertTrue(self.boot_test(cpu, jobs))
+
+    def test_buses(self):
+        options = [("--bus-standard", ["wishbone", "axi-lite", "axi"]),
+                ("--bus-data-width", [32, 64]),
+                ("--bus-address-width", [32, 64]),
+                ("--bus-interconnect", ["shared", "crossbar"])]
+
+        # TODO: Investigate those failures
+        blacklists = [
+            # AXI-Lite with 64-bit data width and crossbar
+            [
+                ("--bus-standard", ["axi-lite"]),
+                ("--bus-data-width", [64]),
+                ("--bus-interconnect", ["crossbar"])
+            ],
+            # AXI with 64-bit data width
+            [
+                ("--bus-standard", ["axi"]),
+                ("--bus-data-width", [64])
+            ]
+        ]
+
+        def is_blacklisted(config):
+            for blacklist in blacklists:
+                matches = True
+                for opt, values in blacklist:
+                    cfg_value = next(v for k,v in config if k == opt)
+                    if cfg_value not in values:
+                        matches = False
+                        break
+                if matches:
+                    return True
+            return False
+
+        from itertools import product
+        jobs = os.cpu_count()
+
+        # Generate all combinations
+        keys = [k for k,_ in options]
+        values = [v for _,v in options]
+        
+        for combination in product(*values):
+            config = list(zip(keys, combination))
+            
+            # Skip blacklisted combinations
+            if is_blacklisted(config):
+                continue
+                
+            # Build args string
+            args = " ".join(f"{k}={v}" for k,v in config)
+            
+            with self.subTest(args=args):
+                self.assertTrue(self.boot_test(jobs=jobs, args=args))
