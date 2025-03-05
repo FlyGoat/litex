@@ -71,7 +71,7 @@ class i6500(CPU):
         self.platform     = platform
         self.variant      = variant
         self.reset        = Signal()
-        self.interrupt    = Signal(7)
+        self.interrupt    = Signal(8)
         # Peripheral bus (Connected to main SoC's bus).
         axi_if = axi.AXIInterface(data_width=64, address_width=32, id_width=11, ar_user_width=8, aw_user_width=8)
         self.periph_buses = [axi_if]
